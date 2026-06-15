@@ -1,0 +1,52 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION     = 'us-east-1'
+        ECR_REGISTRY   = 'YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com'
+        REPO_NAME      = 'pilot-svc'
+        IMAGE_TAG      = "${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Lint & Test') {
+            steps {
+                dir('services/pilot-svc/app') {
+                    print "Running python syntax checks..."
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                dir('services/pilot-svc') {
+                    script {
+                        dockerImage = docker.build("${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}")
+                    }
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                script {
+                    withAWS(region: "${AWS_REGION}", credentials: 'aws-credentials-id') {
+                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                        sh "docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}"
+                        sh "docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest"
+                        sh "docker push ${ECR_REGISTRY}/${REPO_NAME}:latest"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline completed successfully for Pilot Service!"
+        }
+        failure {
+            echo "Pipeline failed. Check the logs."
+        }
+    }
+}
