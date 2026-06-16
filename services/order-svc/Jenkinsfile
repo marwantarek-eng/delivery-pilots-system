@@ -3,8 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION     = 'us-east-1'
-        // ⚠️ حط رقم الـ AWS Account الحقيقي بتاعك هنا مكان الـ 123456789012
-        ECR_REGISTRY   = '123456789012.dkr.ecr.us-east-1.amazonaws.com'
+        ECR_REGISTRY   = '496043249726.dkr.ecr.us-east-1.amazonaws.com'
         REPO_NAME      = 'order-svc'
         IMAGE_TAG      = "${BUILD_NUMBER}"
     }
@@ -13,48 +12,36 @@ pipeline {
         stage('Lint & Test') {
             steps {
                 dir('services/order-svc/app') {
-                    print "Running python syntax checks..."
+                    sh 'echo "Running Python syntax checks..."'
                 }
             }
         }
 
-        stage('Docker Build') {
+        stage('Docker Build & Push') {
             steps {
                 dir('services/order-svc') {
-                    script {
-                        // ضغط الفولدر وبنائه دايركت عبر الـ Socket باستخدام الـ URL الصحيح لتفادي بورت 80
-                        sh """
-                        tar -cf context.tar .
-                        curl --unix-socket /var/run/docker.sock -H "Content-Type: application/x-tar" \
-                          -X POST "http:/v1.40/build?t=${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}" \
-                          --data-binary @context.tar
-                        rm -f context.tar
-                        """
-                    }
-                }
-            }
-        }
-
-        stage('Push to ECR') {
-            steps {
-                script {
                     withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
                                      string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        
                         sh """
-                        TOKEN=\$(aws ecr get-login-password --region ${AWS_REGION})
+                        # 1. تنزيل الـ Docker CLI جوه جينكينز لو مش موجود (بدون صلاحيات root)
+                        if ! command -v docker &> /dev/null; then
+                            echo "Installing Docker CLI..."
+                            curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
+                            tar -xzf docker.tgz --strip-components=1 docker/docker
+                            mv docker /var/jenkins_home/
+                            rm -f docker.tgz
+                        fi
                         
-                        # تسجيل الدخول في الـ Podman بره عبر الـ Socket
-                        curl --unix-socket /var/run/docker.sock -X POST -H "Content-Type: application/json" \
-                          -d "{\\"username\\":\\"AWS\\",\\"password\\":\\"\${TOKEN}\\",\\"serveraddress\\":\\"https://${ECR_REGISTRY}\\"}" \
-                          "http:/v1.40/auth"
+                        # 2. إضافة الـ CLI للـ PATH عشان جينكينز يشوفه
+                        export PATH="/var/jenkins_home:\$PATH"
                         
-                        # عمل الـ Push طيران عبر الـ API
-                        curl --unix-socket /var/run/docker.sock -X POST "http:/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}/push"
+                        # 3. البناء والشحن الطبيعي جداً
+                        docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
                         
-                        curl --unix-socket /var/run/docker.sock -X POST "http:/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}/tag?repo=${ECR_REGISTRY}/${REPO_NAME}&tag=latest"
-                        
-                        curl --unix-socket /var/run/docker.sock -X POST "http:/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:latest/push"
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
+                        docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
+                        docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
                         """
                     }
                 }
@@ -63,11 +50,7 @@ pipeline {
     }
 
     post {
-        success {
-            echo "Pipeline completed successfully for Order Service!"
-        }
-        failure {
-            echo "Pipeline failed. Check the logs."
-        }
+        success { echo "Pipeline completed successfully for Order Service 🚀" }
+        failure { echo "Pipeline failed. Check logs ❌" }
     }
 }
