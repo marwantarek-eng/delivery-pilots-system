@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION     = 'us-east-1'
-        ECR_REGISTRY   = 'YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com'
+        ECR_REGISTRY   = '496043249726.dkr.ecr.us-east-1.amazonaws.com'
         REPO_NAME      = 'pilot-svc'
         IMAGE_TAG      = "${BUILD_NUMBER}"
     }
@@ -12,29 +12,45 @@ pipeline {
         stage('Lint & Test') {
             steps {
                 dir('services/pilot-svc/app') {
-                    print "Running python syntax checks..."
+                    sh 'echo "Running Python syntax checks..."'
                 }
             }
         }
 
-        stage('Docker Build') {
+        stage('Docker Build & Push') {
             steps {
                 dir('services/pilot-svc') {
-                    script {
-                        dockerImage = docker.build("${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}")
-                    }
-                }
-            }
-        }
-
-        stage('Push to ECR') {
-            steps {
-                script {
-                    withAWS(region: "${AWS_REGION}", credentials: 'aws-credentials-id') {
-                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                        sh "docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}"
-                        sh "docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest"
-                        sh "docker push ${ECR_REGISTRY}/${REPO_NAME}:latest"
+                    withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+                                     string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        script {
+                            sh """
+                            if ! command -v docker &> /dev/null; then
+                                curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
+                                tar -xzf docker.tgz --strip-components=1 docker/docker
+                                mv docker /var/jenkins_home/
+                                rm -f docker.tgz
+                            fi
+                            export PATH="/var/jenkins_home:\$PATH"
+                            
+                            docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
+                            
+                            if [ ! -f /var/jenkins_home/aws ]; then
+                                curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                                unzip -q awscliv2.zip || true
+                                ./aws/install -i /var/jenkins_home/aws-cli -b /var/jenkins_home || true
+                                rm -rf awscliv2.zip aws
+                            fi
+                            
+                            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                            
+                            /var/jenkins_home/aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            
+                            docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
+                            docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
+                            docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
+                            """
+                        }
                     }
                 }
             }
@@ -43,10 +59,10 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline completed successfully for Pilot Service!"
+            echo "Pipeline completed successfully for Pilot Service 🚀"
         }
         failure {
-            echo "Pipeline failed. Check the logs."
+            echo "Pipeline failed for Pilot Service. Check logs ❌"
         }
     }
 }
