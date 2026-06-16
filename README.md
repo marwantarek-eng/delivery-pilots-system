@@ -12,7 +12,6 @@ The system combines Infrastructure as Code (IaC), Continuous Integration (CI), C
 
 ## Architecture Diagram
 
-> Insert the complete architecture diagram here.
 
 <img width="1600" height="872" alt="digram" src="https://github.com/user-attachments/assets/be37b8a7-9a82-49b6-84c6-fbdc493e8b56" />
 
