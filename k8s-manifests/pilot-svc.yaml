@@ -5,7 +5,7 @@ metadata:
   labels:
     app: pilot-svc
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: pilot-svc
@@ -33,3 +33,21 @@ spec:
     port: 5002
     targetPort: 5002
   type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pilot-ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /pilots
+        pathType: Prefix
+        backend:
+          service:
+            name: pilot-svc
+            port:
+              number: 5002
