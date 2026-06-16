@@ -20,25 +20,54 @@ pipeline {
         stage('Docker Build & Push') {
             steps {
                 dir('services/order-svc') {
-                    script {
-                        sh """
-                        # 1. تنزيل الـ Docker CLI لو مش موجود
-                        if ! command -v docker &> /dev/null; then
-                            curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
-                            tar -xzf docker.tgz --strip-components=1 docker/docker
-                            mv docker /var/jenkins_home/
-                            rm -f docker.tgz
-                        fi
-                        export PATH="/var/jenkins_home:\$PATH"
-                        
-                        # 2. البناء الطبيعي
-                        docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
-                        
-                        # 3. الـ Push المباشر (بيعتمد على الـ Login اللي عملناه على الـ Host بره)
-                        docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
-                        docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
-                        docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
-                        """
+                    withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
+                                     string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        script {
+                            sh """
+                            # 1. تنزيل الـ Docker CLI لو مش موجود
+                            if ! command -v docker &> /dev/null; then
+                                curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
+                                tar -xzf docker.tgz --strip-components=1 docker/docker
+                                mv docker /var/jenkins_home/
+                                rm -f docker.tgz
+                            fi
+                            export PATH="/var/jenkins_home:\$PATH"
+                            
+                            # 2. البناء الطبيعي للميكروسيرفيس
+                            docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
+                            
+                            # 3. تثبيت أداة خفيفة جداً لعمل الـ Login لـ AWS بدون الحاجة للـ AWS CLI الكامل
+                            # هنستخدم الـ curl عشان نكلم الـ AWS STS ونمضي الـ Token جوه الـ Pipeline نفسه
+                            echo "Authenticating with AWS ECR..."
+                            
+                            # لقط الـ Token المؤقت للـ ECR مباشرة
+                            # جينكينز هيعمل الـ Login جوه الـ Home بتاعه عشان الـ Push يشتغل 100%
+                            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                            
+                            # الطريقة البديلة الأنظف: دمج الـ Login عبر تمرير الـ Config لملف الـ docker الخاص بجينكينز جوه الكونتينر
+                            mkdir -p ~/.docker
+                            
+                            # هنسجل دخول للـ Podman socket عبر الـ CLI النظيف
+                            # بما إننا معندناش aws cli، هنستخدم أمر التسجيل الصريح الموثوق بـ سحب الـ token عبر الـ API
+                            # أو الأسهل: هنمرر الـ Token اللي هنجيبه بـ سكربت python خفيف موجود كدا كدا جوه جينكينز لإن الـ image بايثون!
+                            
+                            python3 -c "
+import boto3, os, subprocess
+ecr = boto3.client('ecr', region_name='${AWS_REGION}', aws_access_key_id='${AWS_ACCESS_KEY_ID}', aws_secret_access_key='${AWS_SECRET_ACCESS_KEY}')
+token = ecr.get_authorization_token()['authorizationData'][0]['authorizationToken']
+import base64
+password = base64.b64decode(token).decode('utf-8').split(':')[1]
+p = subprocess.Popen(['docker', 'login', '--username', 'AWS', '--password-stdin', '${ECR_REGISTRY}'], stdin=subprocess.PIPE)
+p.communicate(input=password.encode())
+"
+                            
+                            # 4. الـ Push النهائي على نضافة
+                            docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
+                            docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
+                            docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
+                            """
+                        }
                     }
                 }
             }
