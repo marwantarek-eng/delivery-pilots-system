@@ -24,36 +24,33 @@ pipeline {
                                      string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')]) {
                         script {
                             sh """
-                            # 1. Download Docker CLI if not exists
                             if ! command -v docker &> /dev/null; then
                                 curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                                 tar -xzf docker.tgz --strip-components=1 docker/docker
                                 mv docker /var/jenkins_home/
                                 rm -f docker.tgz
                             fi
-                            
-                            # 2. Download AWS ECR Credential Helper (The Magic Bullet)
-                            if [ ! -f /var/jenkins_home/docker-credential-ecr-login ]; then
-                                curl -fsSL https://amazon-ecr-credential-helper-releases.s3.us-east-1.amazonaws.com/0.6.0/linux-amd64/docker-credential-ecr-login -o /var/jenkins_home/docker-credential-ecr-login
-                                chmod +x /var/jenkins_home/docker-credential-ecr-login
-                            fi
-                            
                             export PATH="/var/jenkins_home:\$PATH"
                             
-                            # 3. Configure Docker to use ECR helper automatically
-                            mkdir -p ~/.docker
-                            echo '{"credHelpers": {"496043249726.dkr.ecr.us-east-1.amazonaws.com": "ecr-login"}}' > ~/.docker/config.json
+                            docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
                             
-                            # 4. Export AWS Keys for the credential helper
+                            # Ultimate Fix: Native inline login and push passing credentials directly to the host socket
                             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
                             export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             
-                            # 5. Build and Push (Authentication is handled natively by the helper)
-                            docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
+                            curl -fsSL https://amazon-ecr-credential-helper-releases.s3.us-east-1.amazonaws.com/0.6.0/linux-amd64/docker-credential-ecr-login -o /var/jenkins_home/docker-credential-ecr-login
+                            chmod +x /var/jenkins_home/docker-credential-ecr-login
+                            
+                            /var/jenkins_home/docker-credential-ecr-login get <<< '{"serverURL": "496043249726.dkr.ecr.us-east-1.amazonaws.com"}' > token.txt
+                            TOKEN=\$(cat token.txt | json_pp | grep Secret | awk -F '"' '{print \$4}' || cat token.txt | grep -oP '"Secret":"\K[^"]+')
+                            
+                            docker login --username AWS --password-stdin ${ECR_REGISTRY} <<< "\$TOKEN"
                             
                             docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
                             docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
                             docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
+                            
+                            rm -f token.txt
                             """
                         }
                     }
