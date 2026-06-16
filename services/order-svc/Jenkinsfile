@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION     = 'us-east-1'
-        // ⚠️ حط رقم الـ AWS Account بتاعك الحقيقي هنا مكان الـ 123456789012
+        // ⚠️ حط رقم الـ AWS Account الحقيقي بتاعك هنا مكان الـ 123456789012
         ECR_REGISTRY   = '123456789012.dkr.ecr.us-east-1.amazonaws.com'
         REPO_NAME      = 'order-svc'
         IMAGE_TAG      = "${BUILD_NUMBER}"
@@ -18,28 +18,18 @@ pipeline {
             }
         }
 
-        stage('Setup Podman CLI') {
-            steps {
-                script {
-                    // بننزل الـ Podman Remote النظيف والجاهز للبيئة دي في ثانية واحدة ومن غير صلاحيات root
-                    sh """
-                    if [ ! -f ./podman ]; then
-                        curl -fsSL -o podman.tar.gz https://github.com/containers/podman/releases/download/v4.7.2/podman-remote-static-linux_amd64.tar.gz
-                        tar -xzf podman.tar.gz --strip-components=2
-                        rm -f podman.tar.gz
-                        chmod +x podman
-                    fi
-                    """
-                }
-            }
-        }
-
         stage('Docker Build') {
             steps {
                 dir('services/order-svc') {
                     script {
-                        // البناء بالـ Binary النظيف طيران عبر السوكت
-                        sh "../../podman --url unix:///var/run/docker.sock build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ."
+                        // ضغط الفولدر وبنائه دايركت عبر الـ Socket باستخدام الـ URL الصحيح لتفادي بورت 80
+                        sh """
+                        tar -cf context.tar .
+                        curl --unix-socket /var/run/docker.sock -H "Content-Type: application/x-tar" \
+                          -X POST "http:/v1.40/build?t=${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}" \
+                          --data-binary @context.tar
+                        rm -f context.tar
+                        """
                     }
                 }
             }
@@ -51,12 +41,20 @@ pipeline {
                     withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
                                      string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')]) {
                         
-                        // تسجيل الدخول والشحن لـ ECR رسمي وحاجة تشرح القلب
                         sh """
-                        aws ecr get-login-password --region ${AWS_REGION} | ./podman --url unix:///var/run/docker.sock login --username AWS --password-stdin ${ECR_REGISTRY}
-                        ./podman --url unix:///var/run/docker.sock push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
-                        ./podman --url unix:///var/run/docker.sock tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
-                        ./podman --url unix:///var/run/docker.sock push ${ECR_REGISTRY}/${REPO_NAME}:latest
+                        TOKEN=\$(aws ecr get-login-password --region ${AWS_REGION})
+                        
+                        # تسجيل الدخول في الـ Podman بره عبر الـ Socket
+                        curl --unix-socket /var/run/docker.sock -X POST -H "Content-Type: application/json" \
+                          -d "{\\"username\\":\\"AWS\\",\\"password\\":\\"\${TOKEN}\\",\\"serveraddress\\":\\"https://${ECR_REGISTRY}\\"}" \
+                          "http:/v1.40/auth"
+                        
+                        # عمل الـ Push طيران عبر الـ API
+                        curl --unix-socket /var/run/docker.sock -X POST "http:/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}/push"
+                        
+                        curl --unix-socket /var/run/docker.sock -X POST "http:/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}/tag?repo=${ECR_REGISTRY}/${REPO_NAME}&tag=latest"
+                        
+                        curl --unix-socket /var/run/docker.sock -X POST "http:/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:latest/push"
                         """
                     }
                 }
