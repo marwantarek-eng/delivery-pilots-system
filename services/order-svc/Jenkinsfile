@@ -32,6 +32,12 @@ pipeline {
                         
                         docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
                         
+                        # Fix: Point docker to use the Host authentication cache file directly
+                        export REGISTRY_AUTH_FILE="/run/user/0/containers/auth.json"
+                        if [ ! -f \$REGISTRY_AUTH_FILE ]; then
+                            export REGISTRY_AUTH_FILE="/root/.config/containers/auth.json"
+                        fi
+                        
                         docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
                         docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
                         docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
