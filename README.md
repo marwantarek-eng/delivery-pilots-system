@@ -268,20 +268,9 @@ Developer
 
 DevOps Engineer
 
-* Infrastructure Provisioning
-* CI/CD Pipeline Implementation
-* Kubernetes Deployment
-* GitOps Automation
-* Monitoring & Observability
-
 ### Ziad Ibrahim
 
 DevOps Engineer
-
-* Infrastructure Support
-* Kubernetes Operations
-* Deployment Automation
-* Monitoring Configuration
 
 ---
 
