@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pilot-svc
+  labels:
+    app: pilot-svc
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pilot-svc
+  template:
+    metadata:
+      labels:
+        app: pilot-svc
+    spec:
+      containers:
+      - name: pilot-svc
+        image: 496043249726.dkr.ecr.us-east-1.amazonaws.com/pilot-svc:latest
+        ports:
+        - containerPort: 5002
+        imagePullPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pilot-svc
+spec:
+  selector:
+    app: pilot-svc
+  ports:
+  - protocol: TCP
+    port: 5002
+    targetPort: 5002
+  type: ClusterIP
