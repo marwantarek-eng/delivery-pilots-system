@@ -3,8 +3,8 @@ pipeline {
 
     environment {
         AWS_REGION     = 'us-east-1'
-        // ⚠️ حط رقم الـ AWS Account بتاعك مكان YOUR_AWS_ACCOUNT_ID هنا
-        ECR_REGISTRY   = 'YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com'
+        // ⚠️ حط رقم الـ AWS Account بتاعك الحقيقي هنا مكان الـ 123456789012
+        ECR_REGISTRY   = '123456789012.dkr.ecr.us-east-1.amazonaws.com'
         REPO_NAME      = 'order-svc'
         IMAGE_TAG      = "${BUILD_NUMBER}"
     }
@@ -22,8 +22,11 @@ pipeline {
             steps {
                 dir('services/order-svc') {
                     script {
-                        // قلبناها sh صريحة عشان الـ Podman يشتغل طلقة
-                        sh "docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ."
+                        // بننزل الـ CLI الأصلي بتاع الـ container اللي جوه عشان يكلم الـ Socket الممرر بره
+                        sh """
+                        apt-get update && apt-get install -y docker.io --no-install-recommends
+                        docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} .
+                        """
                     }
                 }
             }
@@ -32,15 +35,16 @@ pipeline {
         stage('Push to ECR') {
             steps {
                 script {
-                    // سحب الـ Credentials اللي لسه عاملينها بإيدينا في جينكينز
                     withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
                                      string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')]) {
                         
-                        // تمرير المتغيرات للـ AWS CLI والـ Podman عشان يسجل دخول ويشحن
-                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                        sh "docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}"
-                        sh "docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest"
-                        sh "docker push ${ECR_REGISTRY}/${REPO_NAME}:latest"
+                        // هنا برضه هينفذ الأوامر عبر الـ CLI النظيف المربوط بالـ Socket
+                        sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
+                        docker tag ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${REPO_NAME}:latest
+                        docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
+                        """
                     }
                 }
             }
