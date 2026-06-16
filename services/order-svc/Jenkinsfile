@@ -22,12 +22,13 @@ pipeline {
             steps {
                 dir('services/order-svc') {
                     script {
-                        // بنضغط ملفات الفولدر ونبعتها للـ Socket بره يعمل لها Build طيران على السيرفر
+                        // بنضغط برا الـ folder الحالي عشان الـ tar ميشتكيش، وبنظبط الـ URL للـ Socket
                         sh """
-                        tar -cf context.tar .
+                        tar -cf ../context.tar .
                         curl --unix-socket /var/run/docker.sock -H "Content-Type: application/x-tar" \
                           -X POST "http://localhost/v1.40/build?t=${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}" \
-                          --data-binary @context.tar
+                          --data-binary @../context.tar
+                        rm -f ../context.tar
                         """
                     }
                 }
@@ -40,17 +41,14 @@ pipeline {
                     withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY_ID'),
                                      string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_ACCESS_KEY')]) {
                         
-                        // بنسجل دخول ونعمل Push عبر الـ API برضه من غير ما نحتاج Docker CLI جوه الكونتينر
                         sh """
-                        # 1. نجيب الـ Token بتاع AWS
                         TOKEN=\$(aws ecr get-login-password --region ${AWS_REGION})
                         
-                        # 2. نبعت أمر الـ Auth للـ Socket بره
+                        # تعديل الـ URL هنا كمان عشان يرمي على السوكت عل طول
                         curl --unix-socket /var/run/docker.sock -X POST -H "Content-Type: application/json" \
                           -d "{\\"username\\":\\"AWS\\",\\"password\\":\\"\${TOKEN}\\",\\"serveraddress\\":\\"https://${ECR_REGISTRY}\\"}" \
                           "http://localhost/v1.40/auth"
                         
-                        # 3. نعمل الـ Push للـ Tag الحالي ولـ latest عن طريق الـ API دايركت
                         curl --unix-socket /var/run/docker.sock -X POST "http://localhost/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}/push"
                         
                         curl --unix-socket /var/run/docker.sock -X POST "http://localhost/v1.40/images/${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}/tag?repo=${ECR_REGISTRY}/${REPO_NAME}&tag=latest"
